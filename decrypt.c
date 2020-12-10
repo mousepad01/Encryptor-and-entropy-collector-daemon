@@ -13,8 +13,10 @@
 // pentru debug si afisari in consola
 const int NOTIFICATIONS = 1;
 
-size_t WORD_SIZE = sizeof(long);
+size_t WORD_SIZE = sizeof(unsigned long);
 size_t PAGE_SIZE;
+
+int WORD_BIT_SIZE = 8 * sizeof(unsigned long);
 
 struct key{
 	
@@ -25,23 +27,31 @@ void getkey(char * key_filename){
 	
 	int key_file_descriptor = open(key_filename, O_RDONLY);
 	
-	KEY.perm = malloc(WORD_SIZE * 8);
+	KEY.perm = malloc(WORD_SIZE);
 	char blank;
 	
-	read(key_file_descriptor, KEY.perm, WORD_SIZE);
+	read(key_file_descriptor, KEY.perm, WORD_BIT_SIZE);
+	
+	if(NOTIFICATIONS){
+	
+		for(int i = 0; i < WORD_BIT_SIZE; i++)
+			printf("%d ", KEY.perm[i]);
+			
+		printf("\n");
+	}
 }
 
-void decrypt(char * m_ptr){
+void decrypt(long * m_ptr){
 
 	if(NOTIFICATIONS)
 		printf("Procesul copil %d decripteaza..\n", getpid());
 	
 	for(int w_count = 0; w_count < PAGE_SIZE / WORD_SIZE; w_count++){
 		
-		char encrypted_word = m_ptr[w_count];
-		char decrypted_word = 0;
+		unsigned long encrypted_word = m_ptr[w_count];
+		unsigned long decrypted_word = 0;
 		
-		for(int i = 0; i < WORD_SIZE; i++){
+		for(int i = 0; i < WORD_BIT_SIZE; i++){
 			
 			decrypted_word |= ((encrypted_word >> KEY.perm[i]) & 1) << i;
 		}
@@ -87,31 +97,25 @@ int main(int argc, char * argv[]){
 	
 	if(file_size % PAGE_SIZE)
 		n_pages += 1;
-		
+	
 	if(NOTIFICATIONS)
 		printf("number of pages %d\n", n_pages);
-		
+	
 	// preluarea cheii din fisier
 	
 	getkey(key_filename);
 	
-	int key_file_descriptor = open("keyfile.txt", O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR);
-	
-	for(int i = 0; i < WORD_SIZE; i++){
-		
-		write(key_file_descriptor, &KEY.perm[i], 1);
-		write(key_file_descriptor, " ", 1);
-	}
-	
 	// decriptarea cu ajutorul mai multor procese
 	
 	for(int proc_cnt = 0; proc_cnt < n_pages; proc_cnt++){
-	
+		
+		fflush(NULL); // pentru a evita anomalii la afisare in consola
+		
 		pid_t pid = fork();
 		
 		if(pid == 0){
 		
-			char * m_ptr = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, file_descriptor, proc_cnt * PAGE_SIZE);
+			unsigned long * m_ptr = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, file_descriptor, proc_cnt * PAGE_SIZE);
 			
 			if(m_ptr == MAP_FAILED){
 				
