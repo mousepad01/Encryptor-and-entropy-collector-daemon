@@ -13,10 +13,12 @@
 // pentru debug si afisari in consola
 const int NOTIFICATIONS = 1;
 
-size_t WORD_SIZE = sizeof(unsigned long);
+size_t WORD_SIZE = sizeof(char);
 size_t PAGE_SIZE;
 
-int WORD_BIT_SIZE = 8 * sizeof(unsigned long);
+int WORD_BIT_SIZE = 8 * sizeof(char);
+
+int left_w_to_decrypt;
 
 struct key{
 	
@@ -41,22 +43,28 @@ void getkey(char * key_filename){
 	}
 }
 
-void decrypt(long * m_ptr){
+void decrypt(char * m_ptr){
 
 	if(NOTIFICATIONS)
 		printf("Procesul copil %d decripteaza..\n", getpid());
 	
-	for(int w_count = 0; w_count < PAGE_SIZE / WORD_SIZE; w_count++){
+	for(int w_count = 0; w_count < PAGE_SIZE / WORD_SIZE && left_w_to_decrypt > 0; w_count++){
+	
+		char encrypted_word = m_ptr[w_count];
+		char decrypted_word = 0;
 		
-		unsigned long encrypted_word = m_ptr[w_count];
-		unsigned long decrypted_word = 0;
+		//printf("%lu ", encrypted_word);
 		
 		for(int i = 0; i < WORD_BIT_SIZE; i++){
 			
 			decrypted_word |= ((encrypted_word >> KEY.perm[i]) & 1) << i;
 		}
 		
+		//printf("%lu\n", decrypted_word);
+		
 		m_ptr[w_count] = decrypted_word;
+		
+		left_w_to_decrypt -= 1;
 	}		
 }
 	
@@ -88,6 +96,8 @@ int main(int argc, char * argv[]){
 	
 	off_t file_size = st.st_size;
 	
+	left_w_to_decrypt = file_size * WORD_SIZE;
+	
 	if(NOTIFICATIONS)
 		printf("file size %ld\n", file_size);
 	
@@ -115,7 +125,7 @@ int main(int argc, char * argv[]){
 		
 		if(pid == 0){
 		
-			unsigned long * m_ptr = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, file_descriptor, proc_cnt * PAGE_SIZE);
+			char * m_ptr = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, file_descriptor, proc_cnt * PAGE_SIZE);
 			
 			if(m_ptr == MAP_FAILED){
 				
@@ -124,6 +134,9 @@ int main(int argc, char * argv[]){
 			}
 			
 			decrypt(m_ptr);
+			
+			msync(m_ptr, PAGE_SIZE, MS_SYNC);
+			munmap(m_ptr, PAGE_SIZE);
 			
 			return 0;
 		}

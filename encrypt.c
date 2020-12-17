@@ -15,14 +15,16 @@
 // pentru debug si afisari in consola
 const int NOTIFICATIONS = 1;
 
-size_t WORD_SIZE = sizeof(unsigned long);
+size_t WORD_SIZE = sizeof(char);
 size_t PAGE_SIZE;
 
-int WORD_BIT_SIZE = 8 * sizeof(unsigned long);
+int WORD_BIT_SIZE = 8 * sizeof(char);
 
 const char * RANDOM_SOURCE = "/home/osboxes/proiect_so/sock_file";
 
 const char * KEY_FILE = "/home/osboxes/proiect_so/keyfile.txt";
+
+int left_w_to_encrypt;
 
 struct key{
 	
@@ -74,8 +76,6 @@ unsigned char * get_rand(int req_b_size){
 	char * req_b_size_str = malloc(10);
 	itoa(req_b_size, req_b_size_str);
 	
-	printf("%s ", req_b_size_str);
-	
 	int header = strlen(req_b_size_str);
 
 	write(sock, &header, 4);
@@ -87,16 +87,10 @@ unsigned char * get_rand(int req_b_size){
 	int stream_size = 0;
 	read(sock, &stream_size, 4);
 	
-	printf("%d ", stream_size);
-	
 	if(stream_size){
 	
 		read(sock, requested_b, stream_size);
 		requested_b[stream_size] = '\0';
-		
-		//printf("%lu ", strlen(requested_b));
-		
-		//printf("%s STOP\n", requested_b);
 	}
 	else{
 		// voi pune o valoare pseudorandom
@@ -130,13 +124,15 @@ void keygen(){
 	
 		unsigned char * aux_i = get_rand(1);
 		unsigned char * aux_j = get_rand(1);
-		printf("%d ", aux_i[0] % WORD_BIT_SIZE);
-		printf("%d\n", aux_j[0] % WORD_BIT_SIZE);
+		
+		if(NOTIFICATIONS){
+		
+			printf("%d ", aux_i[0] % WORD_BIT_SIZE);
+			printf("%d\n", aux_j[0] % WORD_BIT_SIZE);
+		}
+		
 		unsigned char i = aux_i[0] % WORD_BIT_SIZE;
 		unsigned char j = aux_j[0] % WORD_BIT_SIZE;
-		
-		//char i = getrand() % WORD_BIT_SIZE;
-		//char j = getrand() % WORD_BIT_SIZE;
 		
 		swapaux = KEY.perm[i];
 		KEY.perm[i] = KEY.perm[j];
@@ -157,22 +153,30 @@ void keygen(){
 	}
 }
 
-void encrypt(unsigned long * m_ptr){
+void encrypt(char * m_ptr){
 	
 	if(NOTIFICATIONS)
 		printf("Procesul copil %d cripteaza..\n", getpid());
 		
-	for(int w_count = 0; w_count < PAGE_SIZE / WORD_SIZE; w_count++){
+	for(int w_count = 0; w_count < PAGE_SIZE / WORD_SIZE && left_w_to_encrypt > 0; w_count++){
 		
-		unsigned long current_word = m_ptr[w_count];
-		unsigned long encrypted_word = 0;
+		char current_word = m_ptr[w_count];
+		char encrypted_word = 0;
+		
+		//printf("%lu ", current_word);
 		
 		for(int i = 0; i < WORD_BIT_SIZE; i++){
 			
 			encrypted_word |= ((current_word >> i) & 1) << KEY.perm[i];
 		}
 		
+		//printf("%lu ", encrypted_word);
+		
 		m_ptr[w_count] = encrypted_word;
+		
+		left_w_to_encrypt -= 1;
+		
+		//printf("%lu\n", m_ptr[w_count]);
 	}	
 }
 
@@ -205,6 +209,8 @@ int main(int argc, char * argv[]){
 	
 	off_t file_size = st.st_size;
 	
+	left_w_to_encrypt = file_size * WORD_SIZE;
+	
 	if(NOTIFICATIONS)
 		printf("file size %ld\n", file_size);
 	
@@ -222,8 +228,10 @@ int main(int argc, char * argv[]){
 	
 	keygen();
 	
-	// fiecare proces cripteaza cate o pagina din memorie, iar fiecare proces va cripta pe rand
+	// fiecare proces cripteaza cate (maxim) o pagina din memorie, iar fiecare proces va cripta pe rand
 	// cate un cuvant de dimensiune WORD_SIZE
+	
+	// voi retine si numarul de byti ramasi de criptat, pentru a cripta exact dimensiunea
 	
 	for(int proc_cnt = 0; proc_cnt < n_pages; proc_cnt++){
 		
@@ -233,7 +241,7 @@ int main(int argc, char * argv[]){
 		
 		if(pid == 0){
 		
-			unsigned long * m_ptr = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, file_descriptor, proc_cnt * PAGE_SIZE);
+			char * m_ptr = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, file_descriptor, proc_cnt * PAGE_SIZE);
 			
 			if(m_ptr == MAP_FAILED){
 				
@@ -242,6 +250,9 @@ int main(int argc, char * argv[]){
 			}
 			
 			encrypt(m_ptr);
+			
+			msync(m_ptr, PAGE_SIZE, MS_SYNC);
+			munmap(m_ptr, PAGE_SIZE);
 			
 			return 0;
 		}
